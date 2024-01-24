@@ -123,13 +123,13 @@ def format_excel(xlsx_file):
         ws.title = f'Competing by {ws.title}'
 
     # Save the modified workbook
-    wb.save('cannibalization_analysis.xlsx')
+    wb.save('data_formatted.xlsx')
     return wb
 
 
 if __name__ == '__main__':
     if gsc_data_file is not None:
-        data = pd.read_csv(gsc_data_file)
+        data = pd.read_csv('data/pg_test.csv')
         data = data[data['query'].apply(lambda x: is_ascii(str(x)))]
         metrics = ['clicks', 'impressions', 'Impr. & Clicks']
         perc_cumsum = perc_slider / 100
@@ -152,11 +152,12 @@ if __name__ == '__main__':
                     sheet.append(row)
             wb.remove(wb['Sheet'])
             # format excel
-            wb.save('cannibalization_analysis.xlsx')
-            with open("cannibalization_analysis.xlsx", "rb") as file:
+            wb = format_excel('data_formatted.xlsx')
+            wb.save('data_formatted.xlsx')
+            with open("data_formatted.xlsx", "rb") as file:
                 st.download_button(label='Download Cannibalization Analysis',
                                    data=file,
-                                   file_name=f'cannibalization_analysis_threshold_{perc_cumsum}.xlsx',
+                                   file_name='data_formatted.xlsx',
                                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 st.write('---')
