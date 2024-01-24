@@ -129,7 +129,7 @@ def format_excel(xlsx_file):
 
 if __name__ == '__main__':
     if gsc_data_file is not None:
-        data = pd.read_csv('data/pg_test.csv')
+        data = pd.read_csv(gsc_data_file)
         data = data[data['query'].apply(lambda x: is_ascii(str(x)))]
         metrics = ['clicks', 'impressions', 'Impr. & Clicks']
         perc_cumsum = perc_slider / 100
