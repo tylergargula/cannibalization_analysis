@@ -22,13 +22,13 @@ st.markdown("""
 st.markdown("""<h1>Keyword Cannibalization Tool</h1> <p>Find pages that are competing with each other for the same 
 keyword using first party GSC Data. The data must be multi-dimensional and contain query and page data. This can only be 
 achieved using the GSC-API (exports from the GSC dashboard will not work).</p> <b>Directions: </b> <ul> <li>Upload query + page data (.csv) from the GSC API.</li> 
-<li>Optional: Set a % threshold to select the top n% of queries (default 80%).</li> </ul>
+<li>Optional: Set a threshold to select the top n% of queries (default 80%).</li> </ul>
 
 </ul>
 """, unsafe_allow_html=True)
 
 gsc_data_file = st.file_uploader('Upload GSC Data', type='csv', key='key')
-perc_slider = st.slider('Select % Threshold (ex: 80 = Selecting the top 80% of queries by metric)', 0, 100, value=80, step=10, key='int')
+perc_slider = st.slider('Select Threshold (ex: 80 = Selecting the top 80% of queries by metric)', 0, 100, value=80, step=10, key='int')
 
 
 def is_ascii(string):
@@ -151,6 +151,7 @@ if __name__ == '__main__':
                 for row in dataframe_to_rows(df, index=False, header=True):
                     sheet.append(row)
             wb.remove(wb['Sheet'])
+            wb.save('data_formatted.xlsx')
             # format excel
             wb = format_excel('data_formatted.xlsx')
             wb.save('data_formatted.xlsx')
