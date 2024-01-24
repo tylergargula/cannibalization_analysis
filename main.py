@@ -123,7 +123,7 @@ def format_excel(xlsx_file):
         ws.title = f'Competing by {ws.title}'
 
     # Save the modified workbook
-    wb.save('export/test_export_formatted.xlsx')
+    wb.save('cannibalization_analysis.xlsx')
     return wb
 
 
