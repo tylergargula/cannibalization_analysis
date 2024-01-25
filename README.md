@@ -24,6 +24,9 @@ This tool is designed to find pages that are competing with each other for the s
 
 The tool will process the data and provide an Excel file with the analysis results.
 
+## Live App
+You can run a live version of the [seo keyword cannibalization app here](https://keywordcannibalization.streamlit.app/).
+
 ## Author
 
 [Tyler Gargula](https://tylergargula.dev) - Technical SEO & Software Developer
