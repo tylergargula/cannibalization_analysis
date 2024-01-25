@@ -1,3 +1,5 @@
+import dimensions
+import metrics
 import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook, Workbook
@@ -20,15 +22,31 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("""<h1>Keyword Cannibalization Tool</h1> <p>Find pages that are competing with each other for the same 
-keyword using first party GSC Data. The data must be multi-dimensional and contain query and page data. This can only be 
-achieved using the GSC-API (exports from the GSC dashboard will not work).</p> <b>Directions: </b> <ul> <li>Upload query + page data (.csv) from the GSC API.</li> 
+keyword using your first-party GSC Data or SEMrush Keyword data. The data must be multi-dimensional and contain 
+query (keyword) and page data.</p> <b>Directions: </b> <ul> <li>Upload query + page data (.csv) from the GSC API or SEMrush Keyword Export.</li> 
 <li>Optional: Set a threshold to select the top n% of queries (default 80%).</li> </ul>
 
-</ul>
+</ul><br><br>
 """, unsafe_allow_html=True)
 
-gsc_data_file = st.file_uploader('Upload GSC Data', type='csv', key='key')
-perc_slider = st.slider('Select Threshold (ex: 80 = Selecting the top 80% of queries by metric)', 0, 100, value=80, step=10, key='int')
+perc_slider = st.slider('Set Threshold (ex: 80 = Selecting the top 80% of queries by metric)', 0, 100, value=80,
+                        step=10, key='perc_slider')
+gsc_data_file = st.file_uploader('Upload Data', type='csv', key='key')
+
+summary = []
+def check_source(df):
+    # check data source
+    if 'query' in df.columns.str.lower() and 'clicks' in df.columns.str.lower():
+        if 'page' in df.columns.str.lower():
+            return dimensions.gsc_dimensions, metrics.gsc_metrics
+        else:
+            st.error('Data must contain a "page" column.')
+            st.stop()
+    elif 'keyword' in df.columns.str.lower() and 'url' in df.columns.str.lower():
+        return dimensions.semrush_dimensions, metrics.semrush_metrics
+    else:
+        st.error('Data file is invalid. Please upload a valid data file.')
+        st.stop()
 
 
 def is_ascii(string):
@@ -41,11 +59,21 @@ def is_ascii(string):
         return True
 
 
-def process_data(df, metric, perc_cumsum):
+def process_data(df, metric, perc_cumsum, dimension):
+    dimension = [d.lower() for d in dimension]
+    groupby_column_name = dimension[0]
+    metric_name = metric.lower()
+
+    # format column names for final DataFrame
+    if 'query' in dimension:
+        df_cols = [groupby_column_name, 'page', metric_name, 'ctr', 'position', metric_name + '_percent_all_query',
+                   'query_percentile_' + metric_name]
+    if 'keyword' in dimension:
+        df_cols = [groupby_column_name, 'url', metric_name, 'cpc', 'position', metric_name + '_percent_all_keyword']
+
     # Group by the specified metric
-    groupby_column_name = 'query'
-    metric_name = metric
-    grouped_df = df.groupby(metric, as_index=False).apply(lambda group: group.sort_values(metric_name, ascending=False))
+    grouped_df = df.groupby(metric_name, as_index=False).apply(
+        lambda group: group.sort_values(metric_name, ascending=False))
 
     # Calculate sum per group and percentage per group
     sum_per_group = grouped_df.groupby(groupby_column_name)[metric_name].sum().sort_values(ascending=False)
@@ -58,41 +86,43 @@ def process_data(df, metric, perc_cumsum):
     # Merge sum_per_group and top_90_percent back to the original DataFrame
     df = pd.merge(grouped_df, sum_per_group, left_on=groupby_column_name, right_index=True, suffixes=('', '_sum'))
     df = pd.merge(df, top_n_percent, left_on=groupby_column_name, right_index=True,
-                  suffixes=('', '_percent_all_queries'))
+                  suffixes=('', f'_percent_all_{dimension[0]}'))
 
     # Sort DataFrame
     df.sort_values([metric_name + '_sum', metric_name], ascending=[False, False], inplace=True)
 
     # Group by query and calculate the % total of each row within each group
-    df['query_percentile_' + metric_name] = df[metric_name] / df[metric_name + '_sum']
+    df[f'{dimension[0]}_percentile_' + metric_name] = df[metric_name] / df[metric_name + '_sum']
     df.sort_values([metric_name + '_sum', metric_name], ascending=[False, False], inplace=True)
 
     # Keep rows where query_percentile is greater than or equal to 0.09
-    df = df[df['query_percentile_' + metric_name] >= 0.10]
+    df = df[df[f'{dimension[0]}_percentile_' + metric_name] >= 0.10]
 
-    # Keep only duplicate rows in the "query" column
-    df = df[df.duplicated(subset=['query'], keep=False)]
+    # Drop duplicates rows of column 1 and column 2
+    df.drop_duplicates(subset=[dimension[0], dimension[1]], inplace=True)
+
+    # Keep only duplicate rows in the query/keyword column
+    df = df[df.duplicated(subset=[dimension[0]], keep=False)]
 
     # Sort by metric_name + sum, then by metric_name, then by query
-    df.sort_values([metric_name + '_sum', 'query', metric_name, 'position'], ascending=[False, True, False, True],
+    df.sort_values([metric_name + '_sum', dimension[0], metric_name, 'position'], ascending=[False, True, False, True],
                    inplace=True)
 
+    unique_values = df[dimension[0]].nunique()
+    summary.append(f'{unique_values} unique keywords competing by {metric_name}.')
+
     # Select specific columns
-    df = df[[groupby_column_name, 'page', metric_name, 'ctr', 'position', metric_name + '_percent_all_queries',
-             'query_percentile_' + metric_name]]
+    df = df[df_cols]
     return df
 
 
-def process_merge(dfs):
-    merged_df = pd.merge(dfs[0], dfs[1], on=['query', 'page'], how='inner')
-    merged_df = merged_df[merged_df.duplicated(subset=['query'], keep=False)]
-    merged_df.rename(columns={'ctr_x': 'ctr',
-                              'position_x': 'position',
-                              'query_perc_x': 'query_percent_clicks',
-                              'query_perc_y': 'query_percent_impressions',
-                              },
-                     inplace=True)
-    merged_df = merged_df[['query', 'page', 'clicks', 'impressions', 'ctr', 'position']]
+def process_merge(dfs, dimension):
+    merged_df = pd.merge(dfs[0], dfs[1], on=[dimension[0], dimension[1]], how='inner')
+    merged_df = merged_df[merged_df.duplicated(subset=[dimension[0]], keep=False)]
+
+    # remove duplicate columns
+    merged_df = merged_df.loc[:, ~merged_df.columns.str.endswith('_y')]
+    merged_df = merged_df.rename(columns=lambda x: x.replace('_x', ''))
     return merged_df
 
 
@@ -123,43 +153,59 @@ def format_excel(xlsx_file):
         ws.title = f'Competing by {ws.title}'
 
     # Save the modified workbook
-    wb.save('data_formatted.xlsx')
+    wb.save(f'cannibalization_data_threshold_{perc_slider}.xlsx')
     return wb
 
 
 if __name__ == '__main__':
     if gsc_data_file is not None:
         data = pd.read_csv(gsc_data_file)
-        data = data[data['query'].apply(lambda x: is_ascii(str(x)))]
-        metrics = ['clicks', 'impressions', 'Impr. & Clicks']
+
+        # force column names lowercase
+        data.columns = data.columns.str.lower()
+
+        # check data source
+        dimensions, metrics = check_source(data)
+        data = data[data[dimensions[0]].apply(lambda x: is_ascii(str(x)))]
         perc_cumsum = perc_slider / 100
-        # remove rows with 0 clicks
-        data = data[data['clicks'] > 0]
+
+        # remove rows with 0 clicks or traffic
+        data = data[data[metrics[0]] > 0]
         dfs = []
         wb = Workbook()
-        with st.spinner('Processing Data. . .'):
-            for metric in metrics[:2]:
-                df_processed = process_data(data, metric, perc_cumsum)
-                dfs.append(df_processed)
+        for metric in metrics[:2]:
+            df_processed = process_data(data, metric, perc_cumsum, dimensions)
+            dfs.append(df_processed)
+
         # merge dfs
-        with st.spinner('Finalizing Data. . .'):
-            dfs.append(process_merge(dfs))
-        with st.spinner('Generating Spreadsheet. . .'):
+        dfs.append(process_merge(dfs, dimensions))
+        unique_vals = dfs[2][dimensions[0]].nunique()
+        summary.append(f'{unique_vals} unique keywords competing by {metrics[2]}.')
+        try:
             for sheet_name, df in zip(metrics, dfs):
                 sheet = wb.create_sheet(title=sheet_name)
                 # write dataframe to the sheet
+
                 for row in dataframe_to_rows(df, index=False, header=True):
                     sheet.append(row)
-            wb.remove(wb['Sheet'])
-            wb.save('data_formatted.xlsx')
-            # format excel
-            wb = format_excel('data_formatted.xlsx')
-            wb.save('data_formatted.xlsx')
-            with open("data_formatted.xlsx", "rb") as file:
-                st.download_button(label='Download Cannibalization Analysis',
-                                   data=file,
-                                   file_name='data_formatted.xlsx',
-                                   mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        except IndexError:
+            st.error('Threshold is too low. Please increase the threshold.')
+        wb.remove(wb['Sheet'])
+        wb.save(f'cannibalization_data_threshold_{perc_slider}.xlsx')
+        # format excel
+        wb = format_excel(f'cannibalization_data_threshold_{perc_slider}.xlsx')
+        wb.save(f'cannibalization_data_threshold_{perc_slider}.xlsx')
+        # display summary
+        st.markdown(f'### Summary, threshold set to {perc_slider}%')
+        for s in summary:
+            st.markdown(f'{s}')
+        st.markdown(f'')
+        with open(f"cannibalization_data_threshold_{perc_slider}.xlsx", "rb") as file:
+            st.download_button(label=f'Download Cannibalization Analysis',
+                               data=file,
+                               file_name=f'cannibalization_data_threshold_{perc_slider}.xlsx',
+                               mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                               key='download_button')
 
 st.write('---')
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
